@@ -1,0 +1,132 @@
+---
+title: "project1.0"
+author: 'Group 10: Mingxuan Fan, Nikolai Egorov, Zhixin Mao'
+date: "2025-06-13"
+output:
+  pdf_document: default
+  html_document: default
+---
+#select high significant genes related to the treatment response of breast cancer
+```{r}
+library(readxl)
+library(dplyr)
+library(tibble)
+library(tidyr)
+excel_sheets("41586_2021_4278_MOESM4_ESM.xlsx")
+mutation_df <- read_excel("41586_2021_4278_MOESM4_ESM.xlsx", sheet = 2)
+dim(mutation_df)
+head(mutation_df)
+
+# Statistically analyze whether each patient has mutated a certain gene
+mutation_matrix <- mutation_df %>%
+  filter(!is.na(Hugo_Symbol)) %>%
+  mutate(value = 1) %>%
+  distinct(Donor.ID, Hugo_Symbol, .keep_all = TRUE) %>%
+  pivot_wider(id_cols = Donor.ID,
+              names_from = Hugo_Symbol,
+              values_from = value,
+              values_fill = list(value = 0))
+
+# View the matrix
+glimpse(mutation_matrix)
+# Read the reaction tags (pCR/non-pCR)
+response_df <- read_excel("41586_2021_4278_MOESM4_ESM.xlsx", sheet = 1)
+colnames(response_df)[colnames(response_df) == "pCR.RD"] <- "response"
+response_df$response_binary <- ifelse(response_df$response =="pCR", 1, 0)
+
+# Merge the mutation matrix and labels
+merged_df <- inner_join(mutation_matrix, response_df, by = "Donor.ID")
+
+# Screen the gene list
+
+gene_cols <- setdiff(names(merged_df), c("Donor.ID", "response"))
+
+# Perform Fisher's exact test
+fisher_results <- lapply(gene_cols, function(gene) {
+  tbl <- table(merged_df[[gene]], merged_df$response_binary)
+  if (all(dim(tbl) == c(2, 2))) {
+    fisher.test(tbl)$p.value
+  } else {
+    NA
+  }
+})
+
+# Organize the results
+fisher_df <- tibble(Gene = gene_cols, P_value = unlist(fisher_results)) %>%
+  filter(!is.na(P_value)) %>%
+  arrange(P_value)
+
+# View the most significant mutant genes
+head(fisher_df, 10)
+# Clean up the results and remove the labels
+fisher_df_clean <- fisher_df %>%
+  filter(!Gene %in% c("response_binary", "pCR.RD_binary"))
+# Visualize the -log10(p) of significant genes
+library(ggplot2)
+
+top_genes <- fisher_df_clean %>% slice_min(P_value, n = 10)
+
+ggplot(top_genes, aes(x = reorder(Gene, -P_value), y = -log10(P_value))) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top genes associated with pCR",
+       x = "Gene", y = "-log10(p-value)") +
+  theme_minimal()
+```
+
+# select significant feature in clinic data
+```{r}
+# Categorical variable (character or factor type)
+categorical_vars <- c("T.stage", "LN.status.at.diagnosis", "Histology",                       "ER.status", "HER2.status", "Grade.pre.NAT",                            "NAT.regimen", "Surgery.type", "LVI", "PAM50",                          "iC10")
+
+# Numerical variable
+numeric_vars <- c("Age", "ER.Allred", "Chemo.cycles", "aHER2.cycles", 
+                  "Tumour.dimension.surgery.1", "Tumour.dimension.surgery.2", 
+                  "Percent.cellularity", "Percent.CIS", 
+                  "Number.of.LN.removed", "Number.of.positive.LN", 
+                  "Max.LN.met.size", "RCB.score")
+
+## Fisher's test for categorical variables (add Simuly.p.value = TRUE)
+fisher_results <- lapply(categorical_vars, function(var) {
+  tbl <- table(response_df[[var]], response_df$response_binary)
+  if (all(dim(tbl) >= c(2, 2))) {
+    p <- fisher.test(tbl, simulate.p.value = TRUE)$p.value
+  } else {
+    p <- NA
+  }
+})
+fisher_df <- tibble(Variable = categorical_vars, P_value = unlist(fisher_results)) %>%
+  filter(!is.na(P_value)) %>%
+  arrange(P_value)
+
+# Find the numeric variables (numeric type + non-response column)
+numeric_vars <- response_df %>%
+  select(where(is.numeric)) %>%
+  select(-response_binary) %>%
+  names()
+
+# Perform the Wilcoxon test on each numerical variable
+wilcox_results <- lapply(numeric_vars, function(var) {
+  x <- response_df[[var]]
+  y <- response_df$response_binary
+  # exclude NA
+  valid <- complete.cases(x, y)
+  if (length(unique(y[valid])) == 2) {
+    p <- wilcox.test(x[valid] ~ y[valid])$p.value
+  } else {
+    p <- NA
+  }
+})
+
+wilcox_df <- tibble(Variable = numeric_vars, P_value = unlist(wilcox_results)) %>%
+  filter(!is.na(P_value)) %>%
+  arrange(P_value)
+
+head(wilcox_df, 10)
+# Output result
+cat("\n Categorical variable and pCR significance: \n")
+print(fisher_df)
+
+cat("\n Numerical variable versus pCR significance: \n")
+print(wilcox_df)
+```
