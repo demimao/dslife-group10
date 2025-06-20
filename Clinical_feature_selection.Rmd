@@ -1,0 +1,121 @@
+---
+title: "Clinical_feature_selection"
+author: "Zhixin Mao"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(reshape2)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+df  <- data.frame(read_excel("./data/Supplementary_table.xlsx",sheet = 1))
+names(df)
+```
+
+```{r}
+#161 of 168 cases had an RCB assessment
+df <- df[which(df$RCB.category!="NA"),]
+nrow(df) 
+```
+
+```{r}
+y <- df
+rownames(y) <- y$Donor.ID
+# define variables to use
+clinVariables <- c("Age", "T.stage", "LN.status.at.diagnosis", "Histology",
+                   "ER.status", "HER2.status", "Grade.pre.NAT", 
+                   "Chemo.cycles", "Number.of.LN.removed",
+                   "RCB.category")
+
+y <- y[, colnames(y) %in% clinVariables]
+
+# Turn all RCB into 0, pCR into 1
+y$RCB.category  <- factor(y$RCB.category,levels=c("RCB-III","RCB-II","RCB-I","pCR"),labels=c(0,0,0,1))
+
+# Appropriately factor all variables
+y$T.stage       <- as.numeric(substr(y$T.stage,2,2))
+y$LN.status.at.diagnosis <- factor(y$LN.status.at.diagnosis, levels = c("POS", "NEG"))
+y$Histology     <- factor(y$Histology=="IDC")
+y$ER.status     <- factor(y$ER.status,levels=c("POS","NEG"))
+y$HER2.status   <- factor(y$HER2.status,levels=c("NEG","POS"))
+y$Grade.pre.NAT <- factor(y$Grade.pre.NAT,levels=c(2,3))
+y$Chemo.cycles <- as.numeric(y$Chemo.cycles)
+y$Number.of.LN.removed <- as.numeric(y$Number.of.LN.removed)
+
+```
+
+```{r}
+vars <- setdiff(colnames(y), "RCB.category")
+
+# simple logistic regression
+simpleLogisticRegression <- lapply(vars, function(var) {
+  fml <- as.formula(paste("RCB.category ~", var))
+  model <- glm(fml, data = y, family = "binomial")
+  lrm <- summary(model)
+  if (nrow(lrm$coefficients) < 2) return(NULL)
+  pval <- lrm$coefficients[2, "Pr(>|z|)"]
+  odds.ratio <- exp(lrm$coefficients[2, "Estimate"])
+  conf <- suppressMessages(confint(model))
+  ci.low <- exp(conf[2, 1])
+  ci.hi <- exp(conf[2, 2])
+  data.frame(variable = var, pval, odds.ratio, ci.low, ci.hi)
+})
+
+# combine results
+regression.univariable <- do.call(rbind, simpleLogisticRegression)
+regression.univariable$class <- "pCR"
+regression.univariable$type <- "Simple logist."
+
+# check results
+print(regression.univariable)
+```
+
+From the table, we observe that 
+
+1. Older patients have lower odds of achieving pCR (−4.8% per year) — significant.
+2. Larger tumor stage → significantly lower pCR odds. This is expected clinically.
+3. In Ln status, there's significantly higher pCR rate in LN-negative tumors.
+4. IDC histology has higher pCR odds than others. But confidence interval is large, we need to be careful.
+5. ER-negative tumors are much more likely to respond (consistent with biology).
+6. Better response in HER2+, but not statistically significant.
+7. High-grade tumors (grade 3 vs 2) → significantly better response.
+8. Slight increase in pCR odds per extra chemo cycle, but not significant.
+9. For number of LN removed, slight negative association (likely a surrogate for worse disease burden).
+
+```{r}
+# Plot forest plot for simple logistic regression result
+
+# Prepare plot data
+plot_data <- regression.univariable %>%
+  mutate(
+    variable = factor(variable, levels = rev(variable)),  # reverse for top-down
+    log_odds = log(odds.ratio),                           # log(OR) for symmetry
+    sig = ifelse(pval < 0.05, "Significant", "Not significant")
+  )
+
+# Create forest plot
+ggplot(plot_data, aes(x = variable, y = log_odds, ymin = log(ci.low), ymax = log(ci.hi))) +
+  geom_pointrange(aes(color = sig), size = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  coord_flip() +
+  labs(
+    title = "Univariable Logistic Regression - Forest Plot",
+    x = NULL,
+    y = "log(Odds Ratio)"
+  ) +
+  scale_color_manual(values = c("Significant" = "firebrick", "Not significant" = "grey40")) +
+  theme_minimal(base_size = 14)
+```
+
+
+
+
