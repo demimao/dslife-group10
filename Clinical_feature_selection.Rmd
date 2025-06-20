@@ -2,7 +2,9 @@
 title: "Clinical_feature_selection"
 author: "Zhixin Mao"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -14,6 +16,9 @@ library(readxl)
 library(reshape2)
 library(dplyr)
 library(ggplot2)
+library(broom)
+library(tidyverse)
+library(ggpubr)
 ```
 
 ```{r}
@@ -22,7 +27,7 @@ names(df)
 ```
 
 ```{r}
-#161 of 168 cases had an RCB assessment
+# 161 of 168 cases had an RCB assessment
 df <- df[which(df$RCB.category!="NA"),]
 nrow(df) 
 ```
@@ -53,6 +58,42 @@ y$Number.of.LN.removed <- as.numeric(y$Number.of.LN.removed)
 
 ```
 
+Before conducting feature selection and logistic regression, we examined the distribution of key clinical features across RCB outcome classes. This step reveals potential class imbalances and helps interpret model coefficients later.
+
+```{r}
+categorical_vars <- c("T.stage", "LN.status.at.diagnosis", "Histology", 
+                      "ER.status", "HER2.status", "Grade.pre.NAT")
+
+bar_plots <- lapply(categorical_vars, function(var) {
+  ggplot(y, aes_string(x = var, fill = "RCB.category")) +
+    geom_bar(position = "fill") +
+    scale_y_continuous(labels = scales::percent_format()) +
+    coord_flip() +
+    labs(y = "Proportion", x = var, title = paste("Distribution of", var)) +
+    theme_minimal(base_size = 12) +
+    scale_fill_manual(values = c("#1f77b4", "#ff7f0e"))
+})
+
+ggarrange(plotlist = bar_plots, ncol = 2, nrow = 3, common.legend = TRUE, legend = "bottom")
+
+```
+
+```{r}
+continuous_vars <- c("Age","Chemo.cycles", "Number.of.LN.removed")
+
+box_plots <- lapply(continuous_vars, function(var) {
+  ggplot(y, aes_string(x = "RCB.category", y = var, fill = "RCB.category")) +
+    geom_boxplot(outlier.size = 1.5) +
+    labs(y = var, x = NULL, title = paste(var, "across RCB categories")) +
+    theme_minimal(base_size = 12) +
+    scale_fill_manual(values = c("#1f77b4", "#ff7f0e")) +
+    theme(legend.position = "none")
+})
+
+ggarrange(plotlist = box_plots, ncol = 2, nrow = 2)
+
+```
+
 ```{r}
 vars <- setdiff(colnames(y), "RCB.category")
 
@@ -78,6 +119,8 @@ regression.univariable$type <- "Simple logist."
 # check results
 print(regression.univariable)
 ```
+
+## Interpretation
 
 From the table, we observe that 
 
@@ -116,6 +159,67 @@ ggplot(plot_data, aes(x = variable, y = log_odds, ymin = log(ci.low), ymax = log
   theme_minimal(base_size = 14)
 ```
 
+```{r}
 
+# Multiple logistic regression
+model <- glm(RCB.category ~ Age + T.stage + LN.status.at.diagnosis + Histology + ER.status + 
+             HER2.status + Grade.pre.NAT + Chemo.cycles + Number.of.LN.removed, 
+             family = "binomial", data = y)
+
+# extract regression coefficients
+summary_model <- summary(model)
+conf <- suppressMessages(confint(model))[-1, , drop = FALSE]  # 去除 Intercept
+
+# variables in summary
+regression_multi <- data.frame(
+  variable = rownames(summary_model$coefficients)[-1],
+  estimate = summary_model$coefficients[-1, "Estimate"],
+  pval = summary_model$coefficients[-1, "Pr(>|z|)"],
+  odds.ratio = exp(summary_model$coefficients[-1, "Estimate"]),
+  ci.low = exp(conf[, 1]),
+  ci.high = exp(conf[, 2])
+)
+
+# adjust p-value（Benjamini-Hochberg）
+regression_multi$padj <- p.adjust(regression_multi$pval, method = "BH")
+
+# mark significance
+regression_multi$sig <- ifelse(regression_multi$padj < 0.05, "Significant", "Not significant")
+
+# set graph order
+regression_multi$variable <- factor(regression_multi$variable, levels = rev(regression_multi$variable))
+
+summary_model
+print(regression_multi)
+```
+
+## Interpretation
+
+The top is the summary table of multivariate logistic regression before adjusting p-value, and bottom is after adjusting p-value.
+
+The number of statistically significant features have decreased after adjusting p value:
+
+1. Age: Older age → less likely to achieve pCR 
+2. ER.statusNEG: ER-negative → much more likely to achieve pCR
+
+
+```
+
+```{r}
+ggplot(regression_multi, aes(x = variable, y = log(odds.ratio), 
+                             ymin = log(ci.low), ymax = log(ci.high))) +
+  geom_pointrange(aes(color = sig), size = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  coord_flip() +
+  labs(
+    title = "Multiple Logistic Regression - Forest Plot",
+    x = NULL,
+    y = "log(Odds Ratio)",
+    color = "Adjusted p-value"
+  ) +
+  scale_color_manual(values = c("Significant" = "firebrick", "Not significant" = "grey40")) +
+  theme_minimal(base_size = 14)
+
+```
 
 
