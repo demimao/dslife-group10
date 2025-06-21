@@ -1,0 +1,45 @@
+---
+title: "rawRNA_analysis"
+author: "Nikolai Egorov, Mingxuan Fan, Zhixin Mao"
+date: "2025-06-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+file_path <- "data/transneo-diagnosis-RNAseq-rawcounts.tsv.gz"
+
+# Open a connection to the gzipped file
+gz_con <- gzfile(file_path, open = "rt")  # "rt" = read text
+
+# Read it in as a tab-separated file
+df <- read.table(gz_con,
+                 header = TRUE,     # if the first row has column names
+                 sep    = "\t",     # tab separator
+                 stringsAsFactors = FALSE) 
+
+# Don't forget to close the connection when you're done
+close(gz_con)
+
+# Inspect
+head(df)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
