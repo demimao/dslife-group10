@@ -1,0 +1,109 @@
+---
+title: "mutation selection"
+author: 'Group 10: Mingxuan Fan, Nikolai Egorov, Zhixin Mao'
+date: "2025-06-23"
+output: pdf_document
+---
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+library(ggforce)
+
+# Read mutation and clinical data
+mut_df <- read_excel("41586_2021_4278_MOESM4_ESM.xlsx", sheet = 2)
+clin_df <- read_excel("41586_2021_4278_MOESM4_ESM.xlsx", sheet = 1)
+
+# Calculate mutation frequency of each gene across patients
+mut_counts <- mut_df %>%
+  select(Donor.ID, Hugo_Symbol) %>%
+  distinct() %>%
+  group_by(Hugo_Symbol) %>%
+  summarise(mutated_samples = n()) %>%
+  mutate(freq = mutated_samples / n_distinct(mut_df$Donor.ID)) %>%
+  filter(freq > 0.05)  # Keep genes mutated in >5% of samples
+
+selected_genes <- mut_counts$Hugo_Symbol
+
+# Create a wide-format matrix indicating whether each gene is mutated in each patient
+mut_matrix <- mut_df %>%
+  filter(Hugo_Symbol %in% selected_genes) %>%
+  select(Donor.ID, Hugo_Symbol) %>%
+  distinct() %>%
+  mutate(mutated = 1) %>%
+  pivot_wider(names_from = Hugo_Symbol, values_from = mutated, values_fill = 0)
+
+# Merge with clinical data
+merged_df <- clin_df %>%
+  select(Donor.ID, pCR.RD) %>%
+  mutate(pCR = ifelse(pCR.RD == "pCR", 1, 0)) %>%
+  left_join(mut_matrix, by = "Donor.ID") %>%
+  replace(is.na(.), 0)
+
+# Identify gene columns
+gene_cols <- setdiff(colnames(merged_df), c("Donor.ID", "pCR.RD", "pCR"))
+
+# Run univariable logistic regression: pCR ~ each gene
+results_list <- lapply(gene_cols, function(gene) {
+  model <- glm(pCR ~ merged_df[[gene]], data = merged_df, family = binomial)
+  est <- summary(model)$coefficients[2, ]
+  ci <- suppressMessages(confint(model))[2, ]
+  data.frame(
+    Gene = gene,
+    OR = exp(est["Estimate"]),
+    CI_lower = exp(ci[1]),
+    CI_upper = exp(ci[2]),
+    p_value = est["Pr(>|z|)"]
+  )
+})
+
+results_df <- bind_rows(results_list)
+
+# Add labels and color categories
+results_df <- results_df %>%
+  mutate(
+    label = paste0("OR = ", round(OR, 2),
+                   "\nCI: [", round(CI_lower, 2), ", ", round(CI_upper, 2), "]",
+                   "\nP = ", signif(p_value, 2)),
+    color = case_when(
+      p_value > 0.05 ~ "nonsignificant",
+      OR >= 1 ~ "risk",
+      OR < 1 ~ "protective"
+    )
+  )
+
+# Paginate (10 genes per page)
+genes_per_page <- 10
+results_df <- results_df %>%
+  arrange(desc(OR)) %>%
+  mutate(page = ceiling(row_number() / genes_per_page))
+
+n_pages <- max(results_df$page)
+
+# Generate paginated forest plots
+plots <- lapply(1:n_pages, function(p) {
+  ggplot(results_df %>% filter(page == p), aes(x = reorder(Gene, OR), y = OR)) +
+    geom_point(aes(color = color), size = 4) +
+    geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper, color = color), width = 0.2, size = 1) +
+    geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+    coord_flip() +
+    scale_color_manual(values = c("risk" = "red", "protective" = "blue", "nonsignificant" = "gray60")) +
+    scale_y_log10() +
+    geom_text(aes(label = label), hjust = -0.1, size = 4) +
+    theme_minimal(base_size = 14) +
+    labs(
+      y = "Odds Ratio (log scale)",
+      x = NULL,
+      title = paste("Forest Plot - Page", p)
+    )
+})
+
+# Print each page and insert page break
+for (p in 1:n_pages) {
+  print(plots[[p]])
+  cat("\\newpage\n")  # For PDF output, forces a new page
+}
+```
