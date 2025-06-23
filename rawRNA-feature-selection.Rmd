@@ -50,34 +50,52 @@ head(metadata)
 samples_count <- colnames(df)[-1]
 samples_meta <- metadata$Donor.ID
 
-# 2) find the common IDs
-common      <- intersect(samples_count, samples_meta)
-length(common)   # how many samples remain
+# find the common IDs
+#common      <- intersect(samples_count, samples_meta)
+#length(common)   # how many samples remain
 
-countData <- df[, common, drop=FALSE]
+#countData <- df[, common, drop=FALSE]
 
 # if your rownames(meta) are sample IDs:
-colData   <- metadata[match(common, metadata$Donor.ID), , drop=FALSE]
+#colData   <- metadata[match(common, metadata$Donor.ID), , drop=FALSE]
+#head(colData)
 ```
 
 ```{r}
-# 3) Differential expression with DESeq2 -------------------------------
+# Create a binary “response” column
+metadata$response <- ifelse(metadata$RCB.category == "pCR", "pCR", "RD")
+# When build colData, it will carry that column through:
+common   <- intersect(colnames(df)[-1], metadata$Donor.ID)
+countData <- df[, common, drop=FALSE]
+colData   <- metadata[match(common, metadata$Donor.ID), , drop=FALSE]
+
+# Inspect
+head(colData[, c("RCB.category","response")])
+```
+
+```{r}
+# Differential expression with DESeq2
 # Input: un-normalized counts
 dds <- DESeqDataSetFromMatrix(
   countData = countData,
   colData   = colData,
-  design    = ~ RCB.category
+  design    = ~ response
 )
 
 # pre‐filter: drop genes with very low counts across all samples
-keep <- rowSums(counts(dds) >= 10) >= 3
-dds  <- dds[keep, ]
+#keep <- rowSums(counts(dds) >= 10) >= 3
+#dds  <- dds[keep, ]
 
+# Run DESeq
 dds <- DESeq(dds)
 ```
 
 ```{r}
+# Check what you can test
+resultsNames(dds)
 
+res <- results(dds, contrast=c("response","pCR","no pCR"))
+summary(res)
 ```
 
 ```{r}
