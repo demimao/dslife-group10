@@ -3,8 +3,8 @@ title: "Clinical_feature_selection"
 author: "Zhixin Mao"
 date: "`r Sys.Date()`"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -222,4 +222,65 @@ ggplot(regression_multi, aes(x = variable, y = log(odds.ratio),
 
 ```
 
+Next we perform lasso regression to set the coefficients of some features to 0,
+to help us choose features for multi-omics study.
+```{r}
+library(glmnet)
+
+# Perform Lasso Regression
+X <- model.matrix(RCB.category ~ Age + T.stage + LN.status.at.diagnosis + Histology +
+                  ER.status + HER2.status + Grade.pre.NAT +
+                  Chemo.cycles + Number.of.LN.removed, data = y)[, -1]
+
+y_bin <- as.numeric(as.character(y$RCB.category))  
+
+set.seed(123)
+
+# 10-fold cross-validation to choose best lambda
+cv.lasso <- cv.glmnet(X, y_bin, alpha = 1, family = "binomial")
+
+# Plot CV curve
+plot(cv.lasso)
+
+best_lambda_1se <- cv.lasso$lambda.1se
+lasso_model_1se <- glmnet(X, y_bin, alpha = 1, family = "binomial", lambda = best_lambda_1se)
+
+coef(lasso_model_1se)
+
+
+```
+
+According to lasso results, select the features with non-zero coefficients.
+The clinical features selected for multi-omics study are:
+
+* Age
+* LN.status.at.diagnosis
+* ER.status
+* Grade.pre.NAT3    
+
+Next, we calculate the statistics of these features.
+
+```{r}
+# Age summary
+age_stats <- summary(df$Age)
+cat("Age - Median:", median(df$Age, na.rm = TRUE), 
+    "| Min:", min(df$Age, na.rm = TRUE), 
+    "| Max:", max(df$Age, na.rm = TRUE), "\n")
+
+# LN status proportions
+ln_props <- round(prop.table(table(df$LN.status.at.diagnosis)) * 100, 2)
+print(ln_props)
+
+# ER status proportions
+er_props <- round(prop.table(table(df$ER.status)) * 100, 2)
+print(er_props)
+
+# Grade.pre.NAT summary
+grade_counts <- table(df$Grade.pre.NAT)
+grade_proportion <- prop.table(grade_counts) * 100
+
+print(grade_counts)
+print(round(grade_proportion, 2))
+
+```
 
