@@ -2,8 +2,11 @@
 
 **Authors**: Mingxuan Fan, Nikolai Egorov, Zhixin Mao  
 **Project Type**: Scientific Research / Machine Learning in Bioinformatics  
-**Keywords**: Breast Cancer, Multi-omics, Machine Learning, SHAP, pCR, Interpretation, Neoadjuvant Therapy  
+**Keywords**: Breast Cancer, Multi-omics, Machine Learning, SHAP, pCR, Interpretation, Neoadjuvant Therapy 
 
+> *Inspired by*: Sammut, S.J., Crispin-Ortuzar, M., Chin, S.F. et al. (2022).  
+> *Multi-omic machine learning predictor of breast cancer therapy response.* *Nature*, 601, 623–629.  
+> [https://doi.org/10.1038/s41586-021-04278-5](https://doi.org/10.1038/s41586-021-04278-5)
 ---
 
 ## 1. Scientific Motivation
@@ -74,30 +77,6 @@ Breast cancer treatment outcomes, especially in chemotherapy or targeted therapy
 - Accuracy  
 - Sensitivity  
 - Specificity  
-
----
-
-## 5. Related Work
-
-- Sharma et al. (2024): https://doi.org/10.1038/s41389-024-00521-6  
-- Yao et al. (2022): https://doi.org/10.1038/s41598-022-06230-7  
-- Li et al. (2025): https://doi.org/10.1038/s41598-025-03423-8  
-
-**Our Novelty**  
-We reprocess the raw data and redefine features, apply quality control, introduce SHAP-based individual-level interpretability to support clinical decision-making, and do our own biological annotations
-
----
-
-## 6. Project Timeline
-
-| Week | Milestone |
-|------|-----------|
-| 1    | Data collection, cleaning, initial exploration |
-| 2    | Exploratory analysis and visualizations |
-| 3    | Model training (RF, SVM, Logistic Regression) |
-| 4    | Multi-modal feature integration & biological annotation |
-| 5    | SHAP-based interpretation of model outputs |
-| 6    | Final benchmarking, presentation, and reporting |
 
 ---
 
