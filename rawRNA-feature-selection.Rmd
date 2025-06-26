@@ -10,24 +10,28 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-library (data.table)
-library (readxl)
+packages <- c("data.table", "readxl", "DESeq2")
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) {
+  install.packages(packages[!installed])
+}
+# Bioconductor packages like DESeq2 may need BiocManager
+if (!requireNamespace("DESeq2", quietly = TRUE)) {
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+  }
+  BiocManager::install("DESeq2")
+}
+
+library(data.table)
+library(readxl)
 library(DESeq2)
 ```
 
 ```{r}
 file_path <- "data/transneo-diagnosis-RNAseq-rawcounts.tsv.gz"
-
-# Open a connection to the gzipped file
-gz_con <- gzfile(file_path, open = "rt")  # "rt" = read text
-
-# Read it in as a tab-separated file
-df <- read.table(gz_con,
-                 header = TRUE,     # if the first row has column names
-                 sep    = "\t",     # tab separator
-                 stringsAsFactors = FALSE) 
-
-close(gz_con)
+# Use fread from data.table for fast reading of gzipped tab-separated files
+df <- fread(file_path, header = TRUE, sep = "\t", data.table = FALSE)
 ```
 
 ```{r}
@@ -35,7 +39,6 @@ close(gz_con)
 first6_genes <- head(df)
 print(first6_genes)
 ```
-
 
 ```{r}
 metadata <- data.frame(read_excel("data/Supplementary_table.xlsx", sheet = 1))
