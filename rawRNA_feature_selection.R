@@ -5,34 +5,24 @@
 # is in an Excel file.
 
 # Load necessary libraries
-# Install required packages if not already installed
-packages <- c("data.table", "readxl")
-installed <- packages %in% rownames(installed.packages())
+# Install required CRAN packages if not already installed
+cran_packages <- c("data.table", "readxl", "glmnet")
+installed <- cran_packages %in% rownames(installed.packages())
 if (any(!installed)) {
-  install.packages(packages[!installed])
+  install.packages(cran_packages[!installed])
 }
-# Bioconductor packages like DESeq2 may need BiocManager
-if (!requireNamespace("DESeq2", quietly = TRUE)) {
-  if (!requireNamespace("BiocManager", quietly = TRUE)) {
-    install.packages("BiocManager")
-  }
-  BiocManager::install("DESeq2")
+
+# Ensure BiocManager is installed
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
 }
-# glmnet for LASSO regression
-if (!requireNamespace("glmnet", quietly = TRUE)) install.packages("glmnet")
-# Ensure biomaRt is installed for gene annotation
-if (!requireNamespace("biomaRt", quietly = TRUE)) {
-  if (!requireNamespace("BiocManager", quietly = TRUE)) {
-    install.packages("BiocManager")
+
+# Install Bioconductor packages if not already installed
+bioc_packages <- c("DESeq2", "biomaRt", "EnhancedVolcano")
+for (pkg in bioc_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg)
   }
-  BiocManager::install("biomaRt")
-}
-# EnhancedVolcano for visualization
-if (!requireNamespace("EnhancedVolcano", quietly = TRUE)) {
-  if (!requireNamespace("BiocManager", quietly = TRUE)) {
-    install.packages("BiocManager")
-  }
-  BiocManager::install("EnhancedVolcano")
 }
 
 library(data.table)
