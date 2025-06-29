@@ -18,7 +18,7 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 }
 
 # Install Bioconductor packages if not already installed
-bioc_packages <- c("DESeq2", "biomaRt", "EnhancedVolcano")
+bioc_packages <- c("DESeq2", "biomaRt")
 for (pkg in bioc_packages) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
     BiocManager::install(pkg)
@@ -30,7 +30,7 @@ library(readxl)
 library(DESeq2)
 library(glmnet)
 library(biomaRt)
-library(EnhancedVolcano)
+library(dplyr)
 
 # Load the data
 # Assuming the file is in the current working directory or specify the full path
@@ -95,25 +95,35 @@ response <- as.factor(col_data$Response)
 
 # LASSO logistic regression
 set.seed(123)
-cvfit <- cv.glmnet(gene_mat, response, family = "binomial", alpha = 1)
+cvfit <- cv.glmnet(gene_mat, response, family = "binomial", alpha = 1, standardize = TRUE)
 
 # Get non-zero coefficients (selected predictors)
 best_lambda <- cvfit$lambda.min
 coef_lasso <- coef(cvfit, s = best_lambda)
-selected_genes <- rownames(coef_lasso)[which(coef_lasso != 0)]
-selected_genes <- selected_genes[selected_genes != "(Intercept)"]  # Remove intercept
+# convert to a named numeric vector and drop the intercept
+coef_vec <- as.numeric(coef_lasso)
+names(coef_vec) <- rownames(coef_lasso)
+coef_vec <- coef_vec[names(coef_vec) != "(Intercept)"]
 
-# View top predictors
-print(selected_genes)
+# select only those genes with non-zero coefficient
+selected_genes <- names(coef_vec)[coef_vec != 0]
+
+# Filter the matrix
+important_genes <- sig_genes[selected_genes , , drop=FALSE]
+# Add lasso coefficients
+important_genes$lasso_coef <- coef_vec[ rownames(important_genes) ]
+head(important_genes)
 
 # Assume your gene IDs are Ensembl IDs in rownames(sig_genes)
-gene_ids <- rownames(sig_genes)
-
-ensembl <- useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
-
+gene_ids <- rownames(important_genes)
 
 # Connect to Ensembl BioMart
-mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+# Or use a recent archived release if the current site is down:
+mart <- useMart(
+  biomart = "ENSEMBL_MART_ENSEMBL",
+  dataset = "hsapiens_gene_ensembl",
+  host    = "https://oct2024.archive.ensembl.org/"
+)
 
 # Retrieve annotations: gene symbol, description, etc.
 annotations <- getBM(
@@ -125,11 +135,30 @@ annotations <- getBM(
 
 # Merge annotation with your results
 annotated_sig_genes <- merge(
-  data.frame(ensembl_gene_id = gene_ids, sig_genes),
+  data.frame(ensembl_gene_id = gene_ids, important_genes),
   annotations,
-  by = "ensembl_gene_id",
-  all.x = TRUE
+  by = "ensembl_gene_id"
 )
 
 # View annotated results
 head(annotated_sig_genes)
+
+# 1. Define “pCR” groups
+res <- annotated_sig_genes
+res$group_pcr <- "Not significant"
+res$group_pcr[res$padj < 0.05 & res$log2FoldChange >  0] <- "Overexpressed in pCR"
+res$group_pcr[res$padj < 0.05 & res$log2FoldChange <  0] <- "Underexpressed in pCR"
+# Extract over-underexpressed genes
+# 5 most under-expressed (smallest log2FC)
+top5_under <- res %>% 
+  slice_min(order_by = log2FoldChange, n = 5)
+
+# 5 most over-expressed (largest log2FC)
+top5_over  <- res %>% 
+  slice_max(order_by = log2FoldChange, n = 5)
+
+# Combine them into one table
+top10 <- bind_rows(
+  top5_under  %>% mutate(direction = "under"),
+  top5_over   %>% mutate(direction = "over")
+)
