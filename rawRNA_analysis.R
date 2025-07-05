@@ -178,6 +178,15 @@ candidates <- filter(results_df, p.adj < 0.05)$feature
 # Inspect
 print(candidates)
 
+# Read both tables
+training_df  <- read.csv("data/training_df.csv",  stringsAsFactors = FALSE)
+training_set <- read_excel("data/training_set.csv", sheet = 1)
+
+selected_feats <- training_df[, c("Trial.ID", candidates), drop = FALSE]
+
+merged <- training_set %>%
+  left_join(selected_feats, by = "Trial.ID")
+
 # Prepare data: expression matrix of significant genes
 #gene_mat <- t(count_data[rownames(sig_genes), ])
 #response <- as.factor(col_data$Response)
