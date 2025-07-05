@@ -133,36 +133,50 @@ wilcox.test(pacli[pacli$HER2.status=="HER2-" & pacli$pCR.RD=="pCR","Taxane.Final
 
 # d. Association with every other score
 
-features <- c("STAT1.gsva", "CytScore.log2", "Danaher.B.cells", "Danaher.CD45",
+features <- c("GGI.gsva", "ESC.gsva", "STAT1.gsva", "CytScore.log2", "Danaher.B.cells", "Danaher.CD45",
               "Danaher.CD8.T.cells", "Danaher.Cytotoxic.cells", "Danaher.DC", "Danaher.Exhausted.CD8", 
               "Danaher.Macrophages", "Danaher.Mast.cells" , "Danaher.Neutrophils", "Danaher.NK.CD56dim.cells",
               "Danaher.NK.cells", "Danaher.T.cells", "Danaher.Th1.cells", "Danaher.Treg",
               "TIDE.Dysfunction", "TIDE.Exclusion", "TIDE.MDSC", "TIDE.CAF",
               "TIDE.TAM.M2", "TIDE.IFNG", "TIDE.CD274", "TIDE.CD8")
 
-results <- lapply(features, function(f) {
-  form <- as.formula(paste("RCB.category ~", f))
-  m    <- polr(form, data=rnadata, Hess=TRUE)
-  ctab <- coef(summary(m))
+univ_results <- lapply(features, function(f) {
+  form       <- as.formula(paste("RCB.category ~", f))
+  m          <- polr(form, data=rnadata, Hess=TRUE)
+  s          <- summary(m)
+  # assume the predictor is in the last row of the coefficient table
+  coef_tbl   <- coef(s)
   # which row corresponds to the predictor?
   # typically it’s the last one
-  slope_row <- nrow(ctab)
-  # grab only the predictor’s stats
-  pval    <- pnorm(abs(ctab[, "t value"]), lower.tail=FALSE) * 2
+  slope_row  <- nrow(coef_tbl)
+  estimate   <- coef_tbl[slope_row, "Value"]
+  std_error  <- coef_tbl[slope_row, "Std. Error"]
+  # two‐sided Wald p‐value
+  p_raw      <- pnorm(abs(coef_tbl[, "t value"]), lower.tail = FALSE) * 2
+  
   data.frame(
-    feature = f,
-    p.value = pval[1],
-    row.names = NULL
+    feature   = f,
+    estimate  = estimate,
+    std.error = std_error,
+    p.value   = p_raw[1],
+    stringsAsFactors = FALSE
   )
 })
 
-results_df <- do.call(rbind, results)
+# Bind into one data.frame
+results_df <- bind_rows(univ_results)
 
-# Subset to only significant ones (e.g. p < 0.05)
-signif_results <- subset(results_df, p.value < 0.05)
+# Adjust for multiple testing
+results_df <- results_df %>%
+  mutate(
+    p.adj = p.adjust(p.value, method = "BH")   # only FDR
+  ) %>%
+  arrange(p.adj)
 
+# Pick candidates at FDR < 5%
+candidates <- filter(results_df, p.adj < 0.05)$feature
 # Inspect
-print(signif_results)
+print(candidates)
 
 # Prepare data: expression matrix of significant genes
 #gene_mat <- t(count_data[rownames(sig_genes), ])
