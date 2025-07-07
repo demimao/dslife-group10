@@ -288,12 +288,19 @@ top20 <- lasso_df %>%
 feature_mat <- t(norm_de_genes[top20$geneID, , drop = FALSE ])
 
 # Read both tables
+rna_features_stat  <- read.csv("data/training_set_final.csv",  stringsAsFactors = FALSE)
+
+rna_features_stat <- rna_features_stat[, c("Trial.ID", "STAT1.gsva", "GGI.gsva", "ESC.gsva")]
+colnames(rna_features_stat)[1] <- "Donor.ID"
 rna_features  <- as.data.frame(feature_mat) %>%
   rownames_to_column(var = "Donor.ID")
 training_set <- data.frame(read_excel("data/training_set_new.xlsx", sheet = 1))
 
 merged <- training_set %>%
   left_join(rna_features, by = "Donor.ID")
+
+merged <- merged %>%
+  left_join(rna_features_stat, by = "Donor.ID")
 
 # Write merged dataset into new csv file.
 write.csv(merged,
