@@ -286,6 +286,20 @@ top20 <- lasso_df %>%
   slice_head(n = 20)
 
 feature_mat <- t(norm_de_genes[top20$geneID, , drop = FALSE ])
+
+# Read both tables
+rna_features  <- as.data.frame(feature_mat) %>%
+  rownames_to_column(var = "Donor.ID")
+training_set <- data.frame(read_excel("data/training_set_new.xlsx", sheet = 1))
+
+merged <- training_set %>%
+  left_join(rna_features, by = "Donor.ID")
+
+# Write merged dataset into new csv file.
+write.csv(merged,
+          file      = "data/training_set_new.csv",
+          row.names = FALSE)
+
 #-------------------------------------------------------------------------------
 # Annotation and pathway/enrichment analysis
 #-------------------------------------------------------------------------------
