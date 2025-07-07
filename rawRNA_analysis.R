@@ -1,22 +1,31 @@
+# Authors: Nikolai Egorov, Zhixin Mao, Mingxuan Fan from Group 10
 # This script performs differential expression analysis on RNA-seq raw counts
 # using DESeq2, focusing on cases with RCB assessment and more than one cycle
 # of therapy, as per the study design detailed in Methods (Statistical testing).
+# Furthermore, we performed association testing given features from 
+# Supplementary table (sheet 3).
 # It assumes the raw counts data is in a gzipped tab-separated file and metadata
 # is in an Excel file.
+# This project is based on the existing study: 
+# https://www.nature.com/articles/s41586-021-04278-5#Fig9
+# Data for analysis is provided in the github: 
+# https://github.com/cclab-brca/neoadjuvant-therapy-response-predictor/tree/master
 
-# Load necessary libraries
+#-------------------------------------------------------------------------------
+# Preparation
+#-------------------------------------------------------------------------------
+
+# 1. Install and load necessary libraries
 # Install required CRAN packages if not already installed
 cran_packages <- c("data.table", "readxl", "glmnet")
 installed <- cran_packages %in% rownames(installed.packages())
 if (any(!installed)) {
   install.packages(cran_packages[!installed])
 }
-
 # Ensure BiocManager is installed
 if (!requireNamespace("BiocManager", quietly = TRUE)) {
   install.packages("BiocManager")
 }
-
 # Install Bioconductor packages if not already installed
 bioc_packages <- c("DESeq2", "biomaRt")
 for (pkg in bioc_packages) {
@@ -31,14 +40,16 @@ library(DESeq2)
 library(glmnet)
 library(biomaRt)
 library(dplyr)
+library(tibble)
 library(MASS)
 
-# Load the data
+# 2. Load the data
 # Assuming the file is in the current working directory or specify the full path
 file_path <- "data/transneo-diagnosis-RNAseq-rawcounts.tsv.gz"
 # Use fread from data.table for fast reading of gzipped tab-separated files
 df <- fread(file_path, header = TRUE, sep = "\t", data.table = FALSE)
-row.names(df) <- df[[1]]  # Set the first column as row names
+# Set the first column as row names
+row.names(df) <- df[[1]]  
 df <- df[, -1, drop = FALSE]  # Remove the first column after setting row names
 
 # Check if the data is loaded correctly
@@ -46,37 +57,38 @@ if (is.null(df) || nrow(df) == 0) {
   stop("Data loading failed or the file is empty.")
 }
 
-# Load metadata
+# 3. Load metadata
 # Assuming the metadata file is in the same directory as the raw counts file
 metadata <- data.frame(read_excel("data/Supplementary_table.xlsx", sheet = 1))
-# Load RNA data
-# Includes ....
-rnadata <- data.frame(read_excel("data/Supplementary_table.xlsx", sheet = 3))
-
 # combine ER and HER2 status
 metadata$ERHER2.status <- ifelse(metadata$ER.status=="POS","ER+ HER2-","ER- HER2-")
 metadata$ERHER2.status <- ifelse(metadata$HER2.status=="POS","HER2+",metadata$ERHER2.status)
 
-# Perform analyses with cases that had an RCB assessment and received more than
-# one cycle of therapy
-# Filter metadata to include only cases with RCB assessment and more than one
-# cycle of therapy
-# and HER2-targeted therapy, as per the study design
-# as detailed in Methods (Statistical testing)
-metadata <- metadata[metadata$RCB.category != "NA", ]
+# 4. Filter metadata to include only cases with RCB assessment and more than one
+# cycle of therapy and HER2-targeted therapy.
+metadata <- metadata[!is.na(metadata$RCB.category), ]
 metadata <- metadata[metadata$Chemo.cycles > 1 & metadata$aHER2.cycles > 1, ]
-
 
 # Create a binary “response” column
 metadata$Response <- ifelse(metadata$RCB.category == "pCR", "pCR", "RD")
 
+# 5. update metadata - retain only samples that have RNAseq data
 p <- metadata
-# update metadata - retain only samples that have RNAseq data
 p <- p[p$Donor.ID %in% colnames(df),]
+
+# 6. Filter the counts to only those samples, and reorder to match p
+df <- df[ , p$Donor.ID, drop = FALSE]
+
+# (Optional) sanity-check that ordering matches
+all(colnames(df) == p$Donor.ID)
+# Should return TRUE
 
 #-------------------------------------------------------------------------------
 # Association testing
 #-------------------------------------------------------------------------------
+# Load RNA data
+rnadata <- data.frame(read_excel("data/Supplementary_table.xlsx", sheet = 3))
+
 # a. GGI gsva score
 
 rnadata <- merge(rnadata,p[,c("Donor.ID","RCB.category","pCR.RD","ER.status","HER2.status","ERHER2.status","Grade.pre.NAT")],
@@ -179,45 +191,30 @@ candidates <- filter(results_df, p.adj < 0.05)$feature
 print(candidates)
 
 # Read both tables
-training_df  <- read.csv("data/training_df.csv",  stringsAsFactors = FALSE)
-training_set <- read_excel("data/training_set.csv", sheet = 1)
+#training_df  <- read.csv("data/training_df.csv",  stringsAsFactors = FALSE)
+#training_set <- read_excel("data/training_set.csv", sheet = 1)
 
-selected_feats <- training_df[, c("Trial.ID", candidates), drop = FALSE]
+#selected_feats <- training_df[, c("Trial.ID", candidates), drop = FALSE]
 
-merged <- training_set %>%
-  left_join(selected_feats, by = "Trial.ID")
+# merged <- training_set %>%
+#   left_join(selected_feats, by = "Trial.ID")
 
-# Prepare data: expression matrix of significant genes
-#gene_mat <- t(count_data[rownames(sig_genes), ])
-#response <- as.factor(col_data$Response)
+# Write merged dataset into new csv file.
+# write.csv(merged,
+#          file      = "data/training_set_final.csv",
+#          row.names = FALSE)
 
-# LASSO logistic regression
-# set.seed(123)
-# cvfit <- cv.glmnet(gene_mat, response, family = "binomial", alpha = 1, standardize = TRUE)
+#-------------------------------------------------------------------------------
+# Feature selection
+#-------------------------------------------------------------------------------
 
-# Get non-zero coefficients (selected predictors)
-#best_lambda <- cvfit$lambda.min
-#coef_lasso <- coef(cvfit, s = best_lambda)
-# convert to a named numeric vector and drop the intercept
-#coef_vec <- as.numeric(coef_lasso)
-#names(coef_vec) <- rownames(coef_lasso)
-#coef_vec <- coef_vec[names(coef_vec) != "(Intercept)"]
-
-# select only those genes with non-zero coefficient
-#selected_genes <- names(coef_vec)[coef_vec != 0]
-
-# Filter the matrix
-#important_genes <- sig_genes[selected_genes , , drop=FALSE]
-# Add lasso coefficients
-#important_genes$lasso_coef <- coef_vec[ rownames(important_genes) ]
-#head(important_genes)
-
+# 1. Differential expression analysis with DESeq2
 # When build colData, it will carry that column through:
-common   <- intersect(colnames(df), metadata$Donor.ID)
+common     <- p$Donor.ID
 count_data <- df[, common, drop = FALSE]
-col_data   <- metadata[match(common, metadata$Donor.ID), , drop = FALSE]
+col_data   <- p
+col_data$Response <- factor(col_data$Response, levels = c("RD","pCR"))
 
-# Differential expression with DESeq2
 # Input: un-normalized counts
 dds <- DESeqDataSetFromMatrix(
   countData = count_data,   # raw counts
@@ -228,21 +225,73 @@ dds <- DESeqDataSetFromMatrix(
 # Run DESeq
 dds <- DESeq(dds)
 
-# Check what you can test
-resultsNames(dds)
-
-# res <- results(dds, contrast = c("Response", "pCR", "RD"))
+# See the result
 res <- results(dds)
 summary(res)
 
-# Filter results for significant genes
+# Filter result for significant genes
 # Adjusted p-value < 0.05 and absolute log2 fold change > 0
-sig_genes <- subset(res, padj < 0.05 & abs(log2FoldChange) > 0)
+de_genes <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1 & baseMean > 10)
 # View top significant genes
-head(sig_genes[order(sig_genes$padj), ])
+head(de_genes[order(de_genes$padj), ])
+
+# 2. Prepare data: expression matrix of significant genes
+# Variance‐stabilizing transform (removes depth effects & stabilizes variance)
+vsd <- vst(dds, blind = FALSE)
+
+# Pull out the normalized matrix (genes × samples)
+norm_mat <- assay(vsd)
+norm_de_genes <- norm_mat[rownames(de_genes),]
+
+# gene_mat <- t(count_data[rownames(de_genes), ])
+gene_mat <- t(norm_de_genes)
+response <- as.factor(col_data$Response)
+
+# Cross-validation LASSO logistic regression
+set.seed(123)
+cvfit <- cv.glmnet(gene_mat, response, family = "binomial", alpha = 1, standardize = TRUE)
+
+# Get non-zero coefficients (selected predictors)
+best_lambda <- cvfit$lambda.min
+coef_lasso <- coef(cvfit, s = best_lambda)
+# convert to a named numeric vector and drop the intercept
+coef_vec <- as.numeric(coef_lasso)
+names(coef_vec) <- rownames(coef_lasso)
+coef_vec <- coef_vec[names(coef_vec) != "(Intercept)"]
+
+# select only those genes with non-zero coefficient
+selected_genes <- names(coef_vec)[coef_vec != 0]
+
+# Filter the matrix
+lasso_genes <- de_genes[selected_genes , , drop=FALSE]
+# Add lasso coefficients
+lasso_genes$lasso_coef <- coef_vec[ rownames(lasso_genes) ]
+head(lasso_genes)
+
+# 3. Filter dataset, include genes that have relatively high padj and lasso coef.
+# Turn our lasso'ed dataset of DESeqResults‐like object into a plain data frame
+lasso_df <- as.data.frame(lasso_genes) %>%
+  rownames_to_column("geneID") %>%
+  select(geneID, log2FoldChange, padj, lasso_coef)
+
+# Now compute ranks and pick the top 20
+top20 <- lasso_df %>%
+  filter(!is.na(padj)) %>%               # drop any NAs just in case
+  mutate(
+    #rank_DE    = rank(padj,             ties.method = "first"),
+    rank_LASSO = rank(-abs(lasso_coef), ties.method = "first"),
+    #rank_sum   = rank_DE + rank_LASSO
+  ) %>%
+  arrange(rank_LASSO) %>%
+  slice_head(n = 20)
+
+feature_mat <- t(norm_de_genes[top20$geneID, , drop = FALSE ])
+#-------------------------------------------------------------------------------
+# Annotation and pathway/enrichment analysis
+#-------------------------------------------------------------------------------
 
 # Assume your gene IDs are Ensembl IDs in rownames(sig_genes)
-gene_ids <- rownames(sig_genes)
+gene_ids <- rownames(t(feature_mat))
 
 # Connect to Ensembl BioMart
 # Or use a recent archived release if the current site is down:
@@ -261,29 +310,29 @@ annotations <- getBM(
 )
 
 # Merge annotation with your results
-annotated_sig_genes <- merge(
-  data.frame(ensembl_gene_id = gene_ids, sig_genes),
+annotated_genes <- merge(
+  data.frame(ensembl_gene_id = gene_ids, t(feature_mat)),
   annotations,
   by = "ensembl_gene_id"
 )
 
 # View annotated results
-head(annotated_sig_genes)
+head(annotated_genes)
 
 # Read breast cancer driver genes table
 driver_genes <- fread("data/IntOGen-DriverGenes_BRCA.tsv", sep = "\t", header = TRUE)
 driver_syms <- driver_genes$Symbol
 
 # Then filter
-annotated_drivers <- annotated_sig_genes[
-  annotated_sig_genes$hgnc_symbol %in% driver_syms,
+annotated_drivers <- annotated_genes[
+  annotated_genes$hgnc_symbol %in% driver_syms,
 ]
 
 # Quick check
-table(annotated_drivers$Symbol %in% driver_syms)  # should all be TRUE
+table(annotated_drivers$hgnc_symbol %in% driver_syms)  # should all be TRUE
 
-# 1. Define “pCR” groups
-res <- annotated_sig_genes
+# Define “pCR” groups
+res <- annotated_genes
 res$group_pcr <- "Not significant"
 res$group_pcr[res$padj < 0.05 & res$log2FoldChange >  0] <- "Overexpressed in pCR"
 res$group_pcr[res$padj < 0.05 & res$log2FoldChange <  0] <- "Underexpressed in pCR"
