@@ -42,6 +42,10 @@ library(biomaRt)
 library(dplyr)
 library(tibble)
 library(MASS)
+library(tidyr)
+library(ggplot2)
+library(ggrepel)
+library(EnhancedVolcano)
 
 # 2. Load the data
 # Assuming the file is in the current working directory or specify the full path
@@ -308,10 +312,10 @@ write.csv(merged,
           row.names = FALSE)
 
 #-------------------------------------------------------------------------------
-# Annotation and pathway/enrichment analysis
+# Annotation
 #-------------------------------------------------------------------------------
 
-# Assume your gene IDs are Ensembl IDs in rownames(sig_genes)
+# Extract gene ids from top20 selected genes
 gene_ids <- rownames(t(feature_mat))
 
 # Connect to Ensembl BioMart
@@ -331,26 +335,104 @@ annotations <- getBM(
 )
 
 # Merge annotation with your results
-annotated_genes <- merge(
+annotated_genes_count <- merge(
   data.frame(ensembl_gene_id = gene_ids, t(feature_mat)),
   annotations,
   by = "ensembl_gene_id"
 )
 
-# View annotated results
-head(annotated_genes)
+lasso_annotated_genes <- merge(
+  data.frame(ensembl_gene_id = gene_ids, top20),
+  annotations,
+  by = "ensembl_gene_id"
+)
 
+# View annotated results
+head(annotated_genes_count)
+
+#-------------------------------------------------------------------------------
+# Plot the results
+#-------------------------------------------------------------------------------
+heatmap_df <- annotated_genes_count %>%
+  # keep only the sample columns + gene symbol
+  select(hgnc_symbol, starts_with("T")) %>%
+  pivot_longer(
+    cols      = -hgnc_symbol,
+    names_to  = "Donor.ID",
+    values_to = "Expression"
+  )
+
+# Heatmap with counts
+ggplot(heatmap_df, aes(x = Donor.ID, y = hgnc_symbol, fill = Expression)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low    = "blue",
+    mid    = "white",
+    high   = "red",
+    midpoint = median(heatmap_df$Expression, na.rm = TRUE),
+    name   = "VST\nexpression"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 3),
+    axis.title   = element_blank(),
+    panel.grid   = element_blank()
+  ) +
+  labs(
+    title = "Expression of Genes Across Samples",
+    subtitle = "Rows = genes; columns = donors"
+  ) + scale_x_discrete(
+    breaks = heatmap_df$Donor.ID[seq(1, length(unique(heatmap_df$Donor.ID)), by = 5)]
+  )
+
+# 1) Order by log₂FC
+lasso_annotated_genes <- lasso_annotated_genes %>%
+  arrange(log2FoldChange)
+
+# 2) Extract the unique symbols in that order
+symbol_levels <- unique(lasso_annotated_genes$hgnc_symbol)
+
+# 3) Re-factor and add Direction
+lasso_annotated_genes <- lasso_annotated_genes %>%
+  mutate(
+    hgnc_symbol = factor(hgnc_symbol, levels = symbol_levels),
+    Direction   = ifelse(log2FoldChange > 0, "Over", "Under")
+  )
+ggplot(lasso_annotated_genes, aes(x = hgnc_symbol, y = log2FoldChange, fill = Direction)) +
+  geom_col(width = 0.7) +
+  coord_flip() +
+  scale_fill_manual(values = c(Over="#D73027", Under="#4575B4")) +
+  labs(
+    title = "Top 20 Genes: Log₂ Fold Change",
+    x     = "Gene",
+    y     = "log₂(Fold Change)",
+    fill  = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10),
+    legend.position = "top"
+  )
+#-------------------------------------------------------------------------------
+# Annotation of driver genes
+#-------------------------------------------------------------------------------
 # Read breast cancer driver genes table
 driver_genes <- fread("data/IntOGen-DriverGenes_BRCA.tsv", sep = "\t", header = TRUE)
 driver_syms <- driver_genes$Symbol
 
 # Then filter
-annotated_drivers <- annotated_genes[
-  annotated_genes$hgnc_symbol %in% driver_syms,
+annotated_drivers <- annotated_genes_count[
+  annotated_genes_count$hgnc_symbol %in% driver_syms,
 ]
 
 # Quick check
 table(annotated_drivers$hgnc_symbol %in% driver_syms)  # should all be TRUE
+
+# As we can see, LASSO could not highlight any driver gene as significant in this dataset.
+
+#-------------------------------------------------------------------------------
+# Pathway/enrichment analysis
+#-------------------------------------------------------------------------------
 
 # Define “pCR” groups
 res <- annotated_genes
