@@ -236,6 +236,7 @@ summary(res)
 # Filter result for significant genes
 # Adjusted p-value < 0.05 and absolute log2 fold change > 0
 de_genes <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1 & baseMean > 10)
+de_genes_test <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1)
 # View top significant genes
 head(de_genes[order(de_genes$padj), ])
 
@@ -270,13 +271,12 @@ selected_genes <- names(coef_vec)[coef_vec != 0]
 lasso_genes <- de_genes[selected_genes , , drop=FALSE]
 # Add lasso coefficients
 lasso_genes$lasso_coef <- coef_vec[ rownames(lasso_genes) ]
-head(lasso_genes)
 
 # 3. Filter dataset, include genes that have relatively high padj and lasso coef.
 # Turn our lasso'ed dataset of DESeqResults‐like object into a plain data frame
 lasso_df <- as.data.frame(lasso_genes) %>%
   rownames_to_column("geneID") %>%
-  select(geneID, log2FoldChange, padj, lasso_coef)
+  dplyr::select(geneID, log2FoldChange, padj, lasso_coef)
 
 # Now compute ranks and pick the top 20
 top20 <- lasso_df %>%
@@ -292,24 +292,24 @@ top20 <- lasso_df %>%
 feature_mat <- t(norm_de_genes[top20$geneID, , drop = FALSE ])
 
 # Read both tables
-rna_features_stat  <- read.csv("data/training_set_final.csv",  stringsAsFactors = FALSE)
+#rna_features_stat  <- read.csv("data/training_set_final.csv",  stringsAsFactors = FALSE)
 
-rna_features_stat <- rna_features_stat[, c("Trial.ID", "STAT1.gsva", "GGI.gsva", "ESC.gsva")]
-colnames(rna_features_stat)[1] <- "Donor.ID"
-rna_features  <- as.data.frame(feature_mat) %>%
-  rownames_to_column(var = "Donor.ID")
-training_set <- data.frame(read_excel("data/training_set_new.xlsx", sheet = 1))
+#rna_features_stat <- rna_features_stat[, c("Trial.ID", "STAT1.gsva", "GGI.gsva", "ESC.gsva")]
+#colnames(rna_features_stat)[1] <- "Donor.ID"
+#rna_features  <- as.data.frame(feature_mat) %>%
+#  rownames_to_column(var = "Donor.ID")
+#training_set <- data.frame(read_excel("data/training_set_new.xlsx", sheet = 1))
 
-merged <- training_set %>%
-  left_join(rna_features, by = "Donor.ID")
+#merged <- training_set %>%
+#  left_join(rna_features, by = "Donor.ID")
 
-merged <- merged %>%
-  left_join(rna_features_stat, by = "Donor.ID")
+#merged <- merged %>%
+#  left_join(rna_features_stat, by = "Donor.ID")
 
 # Write merged dataset into new csv file.
-write.csv(merged,
-          file      = "data/training_set_new.csv",
-          row.names = FALSE)
+#write.csv(merged,
+#          file      = "data/training_set_new.csv",
+#          row.names = FALSE)
 
 #-------------------------------------------------------------------------------
 # Annotation
@@ -355,7 +355,7 @@ head(annotated_genes_count)
 #-------------------------------------------------------------------------------
 heatmap_df <- annotated_genes_count %>%
   # keep only the sample columns + gene symbol
-  select(hgnc_symbol, starts_with("T")) %>%
+  dplyr::select(hgnc_symbol, starts_with("T")) %>%
   pivot_longer(
     cols      = -hgnc_symbol,
     names_to  = "Donor.ID",
@@ -374,7 +374,7 @@ ggplot(heatmap_df, aes(x = Donor.ID, y = hgnc_symbol, fill = Expression)) +
   ) +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 3),
+    axis.text.x = element_text(angle = 45, hjust = 1),
     axis.title   = element_blank(),
     panel.grid   = element_blank()
   ) +
@@ -385,14 +385,20 @@ ggplot(heatmap_df, aes(x = Donor.ID, y = hgnc_symbol, fill = Expression)) +
     breaks = heatmap_df$Donor.ID[seq(1, length(unique(heatmap_df$Donor.ID)), by = 5)]
   )
 
+# Waterfall plot
+# Order by log₂FC
+# 0) First, drop any “novel transcript” rows with no symbol
+lasso_annotated_genes <- lasso_annotated_genes %>%
+  filter(!is.na(hgnc_symbol) & hgnc_symbol != "")
+
 # 1) Order by log₂FC
 lasso_annotated_genes <- lasso_annotated_genes %>%
   arrange(log2FoldChange)
 
-# 2) Extract the unique symbols in that order
+# Extract the unique symbols in that order
 symbol_levels <- unique(lasso_annotated_genes$hgnc_symbol)
 
-# 3) Re-factor and add Direction
+# Re-factor and add Direction
 lasso_annotated_genes <- lasso_annotated_genes %>%
   mutate(
     hgnc_symbol = factor(hgnc_symbol, levels = symbol_levels),
@@ -413,6 +419,61 @@ ggplot(lasso_annotated_genes, aes(x = hgnc_symbol, y = log2FoldChange, fill = Di
     axis.text.y = element_text(size = 10),
     legend.position = "top"
   )
+
+# PCA on top 20 genes
+top_genes   <- top20$geneID
+vsd_sub     <- norm_mat[top_genes, , drop = FALSE]    # only those 20 rows
+
+# 3. Transpose and run PCA
+pca_res <- prcomp(t(vsd_sub), scale. = TRUE)
+
+# 4. Grab the scores for samples and merge in your metadata
+pca_df <- as.data.frame(pca_res$x) %>%
+  rownames_to_column("Donor.ID") %>%
+  left_join(p[, c("Donor.ID","Response")], by = "Donor.ID")
+
+# 5. Plot PC1 vs PC2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Response)) +
+  geom_point(size = 3, alpha = 0.8) +
+  stat_ellipse(aes(fill = Response), geom = "polygon", alpha = 0.2, color = NA) +
+  labs(
+    title    = "PCA on Top 20 Differential Genes",
+    subtitle = paste0("Explained: PC1=", round(100*summary(pca_res)$importance[2,1],1),
+                      "%, PC2=", round(100*summary(pca_res)$importance[2,2],1), "%"),
+    x        = paste0("PC1 (", round(100*summary(pca_res)$importance[2,1],1), "%)"),
+    y        = paste0("PC2 (", round(100*summary(pca_res)$importance[2,2],1), "%)")
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    axis.title      = element_text(face = "bold")
+  )
+
+# 3. Prepare a data frame (if needed)
+volcano_df <- as.data.frame(res) %>%
+  tibble::rownames_to_column("Gene.ID")
+
+# 4. Plot with EnhancedVolcano
+EnhancedVolcano(
+  volcano_df,
+  lab           = volcano_df$Gene.ID,         # point labels
+  x             = 'log2FoldChange',           # column name for x-axis
+  y             = 'padj',                     # column name for y-axis
+  xlim          = c(-5, 5),                   # adjust as needed
+  pCutoff       = 0.05,                       # FDR threshold
+  FCcutoff      = 1,                          # |log2FC| threshold
+  pointSize     = 2,
+  selectLab      = character(),
+  col           = c('grey30', 'firebrick2', 'royalblue2', 'darkorange2'),
+  legendLabels  = c('NS','|log2FC| > 1','padj < 0.05','padj < 0.05 & |log2FC| > 1'),
+  legendPosition = 'right',
+  title         = 'Volcano Plot: pCR vs RD Response',
+  subtitle      = 'DESeq2 differential expression',
+  caption       = 'Cutoffs: |log₂FC| > 1, padj < 0.05',
+  drawConnectors = TRUE,                      # connector lines to labels
+  max.overlaps = 20
+)
+
 #-------------------------------------------------------------------------------
 # Annotation of driver genes
 #-------------------------------------------------------------------------------
