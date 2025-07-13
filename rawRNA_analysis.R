@@ -490,13 +490,3 @@ annotated_drivers <- annotated_genes_count[
 table(annotated_drivers$hgnc_symbol %in% driver_syms)  # should all be TRUE
 
 # As we can see, LASSO could not highlight any driver gene as significant in this dataset.
-
-#-------------------------------------------------------------------------------
-# Pathway/enrichment analysis
-#-------------------------------------------------------------------------------
-
-# Define “pCR” groups
-res <- annotated_genes
-res$group_pcr <- "Not significant"
-res$group_pcr[res$padj < 0.05 & res$log2FoldChange >  0] <- "Overexpressed in pCR"
-res$group_pcr[res$padj < 0.05 & res$log2FoldChange <  0] <- "Underexpressed in pCR"
